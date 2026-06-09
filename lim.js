@@ -19,9 +19,10 @@ const api = axios.create({
 });
 
 // ─── Helpers ──────────────────────────────────────────
-const log  = (msg) => console.log(`[${new Date().toLocaleString('id-ID')}] ${msg}`);
-const div  = (char = '─', len = 50) => console.log(char.repeat(len));
+const log    = (msg) => console.log(`[${new Date().toLocaleString('id-ID')}] ${msg}`);
+const div    = (char = '─', len = 50) => console.log(char.repeat(len));
 const divDot = () => div('·');
+const divEq  = () => div('═');
 
 function formatNextClaim(isoString) {
   if (!isoString) return 'N/A';
@@ -44,16 +45,16 @@ function getTimeLeft(isoString) {
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-const ANIMAL_EMOJI = { chicken:'🐔', duck:'🦆', goat:'🐐', cow:'🐄' };
-const PRODUCT_EMOJI = { chicken:'🥚', duck:'🥚', goat:'🥛', cow:'🥛' };
+const ANIMAL_EMOJI   = { chicken:'🐔', duck:'🦆', goat:'🐐', cow:'🐄' };
+const PRODUCT_EMOJI  = { chicken:'🥚', duck:'🥚', goat:'🥛', cow:'🥛' };
+const ANIMAL_LABEL   = { chicken:'Chicken', duck:'Duck', goat:'Goat', cow:'Cow' };
 
-// ─── Upgrade cost table (sesuaikan dengan data game) ──
-// Format: { [level]: cost_untuk_naik_ke_level_berikutnya }
+// ─── Upgrade cost table ────────────────────────────────
 const UPGRADE_COST = {
-  chicken: { 1:500,  2:1000, 3:2000, 4:4000, 5:8000,  6:15000, 7:30000, 8:60000, 9:100000 },
-  duck:    { 1:600,  2:1200, 3:2500, 4:5000, 5:10000, 6:20000, 7:40000, 8:80000, 9:120000 },
-  goat:    { 1:800,  2:1600, 3:3000, 4:6000, 5:12000, 6:25000, 7:50000, 8:90000, 9:150000 },
-  cow:     { 1:1000, 2:2000, 3:4000, 4:8000, 5:15000, 6:30000, 7:60000, 8:100000,9:200000 },
+  chicken: { 1:500,  2:1000, 3:2000, 4:4000, 5:8000,  6:15000, 7:30000, 8:60000,  9:100000 },
+  duck:    { 1:600,  2:1200, 3:2500, 4:5000, 5:10000, 6:20000, 7:40000, 8:80000,  9:120000 },
+  goat:    { 1:800,  2:1600, 3:3000, 4:6000, 5:12000, 6:25000, 7:50000, 8:90000,  9:150000 },
+  cow:     { 1:1000, 2:2000, 3:4000, 4:8000, 5:15000, 6:30000, 7:60000, 8:100000, 9:200000 },
 };
 const MAX_LEVEL = 10;
 
@@ -72,11 +73,11 @@ async function getMe() {
   try {
     const { data } = await api.get('/api/user/me');
     const balance = data.coinBalance ?? data.balance ?? data.coins ?? 0;
-    div();
+    divEq();
     log(`👤 User     : ${data.username || data.first_name}`);
     log(`💰 Coin     : ${Number(balance).toLocaleString('id-ID')}`);
     log(`💵 Rupiah   : ${data.rupiahBalance ?? '-'}`);
-    div();
+    divEq();
     return data;
   } catch (e) {
     log(`❌ getMe gagal: ${e.response?.data?.message || e.message}`);
@@ -88,7 +89,7 @@ async function getMe() {
 async function getFarmStatus() {
   try {
     const { data } = await api.get('/api/farm/status');
-    div();
+    divEq();
     log('🏡 FARM STATUS');
     divDot();
     const balanceMap = {
@@ -116,7 +117,7 @@ async function getFarmStatus() {
       const next   = ready ? '-' : formatNextClaim(timer?.nextClaimAt);
       log(`  ${emoji} ${a.padEnd(7)} Lv${lv} ${stok} ${status}  ${next}`);
     }
-    div();
+    divEq();
     return { raw: data, levelMap, balanceMap };
   } catch (e) {
     log(`❌ getFarmStatus gagal: ${e.response?.data?.message || e.message}`);
@@ -158,6 +159,7 @@ async function upgrade(animalType) {
       log(`❌ Upgrade ${animalType} gagal: ${msg}`);
     }
     divDot();
+    return null;
   }
 }
 
@@ -239,70 +241,104 @@ async function getJoinTasks() {
   }
 }
 
-async function claimJoinTask(taskId) {
+async function claimJoinTask(taskId, taskName) {
   try {
     const { data } = await api.post(`/api/quest/join-task/${taskId}/claim`);
-    log(`✅ Claim task #${taskId} berhasil!`);
+    log(`✅ Claim task "${taskName}" berhasil!`);
     if (data.reward || data.amount || data.coins)
       log(`🎁 Reward : ${data.reward ?? data.amount ?? data.coins}`);
     if (data.message) log(`💬 Pesan  : ${data.message}`);
-    return data;
+    return { success: true, data };
   } catch (e) {
     const msg    = e.response?.data?.message || e.message;
     const status = e.response?.status;
+
+    // ── PESAN PERINGATAN BARU ──────────────────────────
+    divDot();
     if (status === 400) {
-      log(`⚠️  Task #${taskId} sudah diklaim atau belum tersedia: ${msg}`);
+      log(`⚠️  Task "${taskName}" sudah diklaim sebelumnya atau belum tersedia.`);
+    } else if (status === 403) {
+      log(`🔒 Task "${taskName}" terkunci — akses ditolak.`);
+    } else if (status === 404) {
+      log(`❓ Task "${taskName}" tidak ditemukan di server.`);
     } else {
-      log(`❌ Claim task #${taskId} gagal: ${msg}`);
+      log(`❌ Gagal claim task "${taskName}": ${msg}`);
     }
-    return null;
+    log(`⚠️  PERHATIAN : Tugas join task "${taskName}" gagal diklaim otomatis.`);
+    log(`📱  Silakan selesaikan tugas ini secara manual di aplikasi Telegram.`);
+    divDot();
+    // ──────────────────────────────────────────────────
+
+    return { success: false, reason: msg, status };
   }
 }
 
 async function autoJoinTasks() {
-  div();
+  divEq();
   log('📋 MEMPROSES JOIN TASKS...');
   divDot();
   const tasks = await getJoinTasks();
-  if (!tasks) { log('⚠️  Gagal mengambil daftar task.'); div(); return; }
+  if (!tasks) {
+    log('⚠️  Gagal mengambil daftar task.');
+    divEq();
+    return;
+  }
   const taskList = Array.isArray(tasks) ? tasks : (tasks.tasks ?? tasks.data ?? []);
-  if (taskList.length === 0) { log('ℹ️  Tidak ada task yang tersedia.'); div(); return; }
+  if (taskList.length === 0) {
+    log('ℹ️  Tidak ada task yang tersedia.');
+    divEq();
+    return;
+  }
   log(`📌 Ditemukan ${taskList.length} task.`);
   divDot();
-  let claimed = 0, skipped = 0;
+
+  let claimed = 0, skipped = 0, failed = 0;
+  const failedTasks = [];
+
   for (const task of taskList) {
     const taskId      = task.id ?? task.taskId;
     const taskName    = task.name ?? task.title ?? `Task #${taskId}`;
     const isCompleted = task.isCompleted ?? task.completed ?? false;
     const isClaimed   = task.isClaimed   ?? task.claimed   ?? false;
-    if (isCompleted && isClaimed) { log(`⏭️  [SKIP] ${taskName}`); skipped++; continue; }
+
+    if (isCompleted && isClaimed) {
+      log(`⏭️  [SKIP] ${taskName}`);
+      skipped++;
+      continue;
+    }
+
     log(`🔧 Memproses: ${taskName} (ID: ${taskId})`);
-    await claimJoinTask(taskId);
-    claimed++;
+    const result = await claimJoinTask(taskId, taskName);
+
+    if (result.success) {
+      claimed++;
+    } else {
+      failed++;
+      failedTasks.push(taskName);
+    }
     await sleep(1000);
   }
+
   divDot();
-  log(`✅ Selesai. Diklaim: ${claimed} | Dilewati: ${skipped}`);
-  div();
+  log(`✅ Diklaim  : ${claimed} task`);
+  log(`⏭️  Dilewati : ${skipped} task`);
+  log(`❌ Gagal    : ${failed} task`);
+
+  // Ringkasan task yang gagal
+  if (failedTasks.length > 0) {
+    divDot();
+    log('📋 DAFTAR TASK YANG GAGAL DIKLAIM OTOMATIS:');
+    failedTasks.forEach((name, i) => log(`   ${i + 1}. ${name}`));
+    divDot();
+    log('📱 Selesaikan task-task di atas secara MANUAL di aplikasi Telegram.');
+  }
+
+  divEq();
 }
 
 // ══════════════════════════════════════════════════════
-//  MENU INTERAKTIF
+//  MENU HARVEST
 // ══════════════════════════════════════════════════════
-
-function printMainMenu() {
-  console.log('\n' + '═'.repeat(50));
-  console.log('🤖  BOT CATTLE FARM  —  Menu Utama');
-  console.log('═'.repeat(50));
-  console.log('  [1] 🏡  Lihat Status Farm');
-  console.log('  [2] 🌾  Harvest Hewan');
-  console.log('  [3] ⬆️   Upgrade Hewan');
-  console.log('  [4] 📋  Join & Claim Tasks');
-  console.log('  [5] 📺  Watch Ad & Earn');
-  console.log('  [6] 👤  Info Akun');
-  console.log('  [0] 🚪  Keluar');
-  console.log('─'.repeat(50));
-}
 
 function printAnimalMenu(title, showAll = true) {
   console.log(`\n  🐾 ${title}`);
@@ -321,7 +357,6 @@ function animalFromChoice(choice) {
   return map[choice] ?? null;
 }
 
-// ─── Menu Harvest ─────────────────────────────────────
 async function menuHarvest() {
   printAnimalMenu('Pilih Hewan untuk Harvest', true);
   const choice = await prompt('  Masukkan pilihan: ');
@@ -331,7 +366,6 @@ async function menuHarvest() {
   if (!farm) return;
 
   if (choice === '0') {
-    // Harvest semua
     let harvested = 0;
     for (const animal of ALL_ANIMALS) {
       const timer = farm.raw.timers?.find(t => t.animalType === animal);
@@ -355,43 +389,46 @@ async function menuHarvest() {
   const timer = farm.raw.timers?.find(t => t.animalType === animalType);
   if (!timer) { log(`⚠️  Data ${animalType} tidak ditemukan.`); return; }
 
-  div();
-  log(`🔍 Status ${ANIMAL_EMOJI[animalType]} ${animalType.toUpperCase()}`);
+  divEq();
+  log(`🔍 Status ${ANIMAL_EMOJI[animalType]} ${ANIMAL_LABEL[animalType].toUpperCase()}`);
   divDot();
+
   if (timer.isReady) {
     log(`  ✅ Status     : SIAP PANEN`);
-    div();
-    const konfirm = await prompt(`  Panen ${animalType} sekarang? (y/n): `);
+    divEq();
+    const konfirm = await prompt(`  Panen ${ANIMAL_LABEL[animalType]} sekarang? (y/n): `);
     if (konfirm.toLowerCase() === 'y') {
       await harvest(animalType);
     } else {
       log('  ↩️  Dibatalkan.');
     }
   } else {
-    log(`  ⏳ Status     : Belum siap`);
+    log(`  ⏳ Status     : Belum siap dipanen`);
     log(`  ⏱  Sisa Waktu : ${getTimeLeft(timer.nextClaimAt)}`);
     log(`  📅 Next Claim : ${formatNextClaim(timer.nextClaimAt)}`);
-    div();
-    log('  ℹ️  Hewan ini belum bisa dipanen.');
+    divEq();
+    log(`  ℹ️  ${ANIMAL_LABEL[animalType]} belum bisa dipanen saat ini.`);
   }
 }
 
-// ─── Menu Upgrade ─────────────────────────────────────
+// ══════════════════════════════════════════════════════
+//  MENU UPGRADE  (dengan detail coin + jumlah upgrade)
+// ══════════════════════════════════════════════════════
+
 async function menuUpgrade() {
   printAnimalMenu('Pilih Hewan untuk Upgrade', true);
   const choice = await prompt('  Masukkan pilihan: ');
   if (choice === '9') return;
 
-  // Ambil data user (coin) dan farm (level) dulu
   const me   = await getMe();
   const farm = await getFarmStatus();
   if (!me || !farm) return;
 
   const coinBalance = Number(me.coinBalance ?? me.balance ?? me.coins ?? 0);
 
+  // ── Upgrade SEMUA hewan ────────────────────────────
   if (choice === '0') {
-    // Upgrade semua — tampilkan preview dulu
-    div();
+    divEq();
     log('⬆️  PREVIEW UPGRADE SEMUA HEWAN');
     divDot();
     log(`  💰 Coin tersedia : ${coinBalance.toLocaleString('id-ID')}`);
@@ -406,15 +443,15 @@ async function menuUpgrade() {
       const emoji        = ANIMAL_EMOJI[animal];
 
       if (currentLevel >= MAX_LEVEL) {
-        log(`  ${emoji} ${animal.padEnd(7)} Lv${currentLevel}  → MAX LEVEL, tidak bisa upgrade`);
+        log(`  ${emoji} ${animal.padEnd(7)} Lv${currentLevel}  → 🏆 MAX LEVEL`);
         continue;
       }
       if (cost === null) {
-        log(`  ${emoji} ${animal.padEnd(7)} Lv${currentLevel}  → Data biaya tidak tersedia`);
+        log(`  ${emoji} ${animal.padEnd(7)} Lv${currentLevel}  → ⚠️  Data biaya tidak tersedia`);
         continue;
       }
 
-      const cukup = (coinBalance - totalBiaya) >= cost;
+      const cukup  = (coinBalance - totalBiaya) >= cost;
       const status = cukup ? '✅ Cukup' : '❌ Tidak cukup';
       log(`  ${emoji} ${animal.padEnd(7)} Lv${currentLevel} → Lv${currentLevel+1}  Biaya: ${cost.toLocaleString('id-ID')} koin  [${status}]`);
       if (cukup) {
@@ -424,18 +461,18 @@ async function menuUpgrade() {
     }
 
     divDot();
-    log(`  💸 Total biaya    : ${totalBiaya.toLocaleString('id-ID')} koin`);
-    log(`  💰 Sisa setelah   : ${(coinBalance - totalBiaya).toLocaleString('id-ID')} koin`);
+    log(`  💸 Total biaya   : ${totalBiaya.toLocaleString('id-ID')} koin`);
+    log(`  💰 Sisa setelah  : ${(coinBalance - totalBiaya).toLocaleString('id-ID')} koin`);
     divDot();
 
     if (upgradeQueue.length === 0) {
       log('  ⚠️  Tidak ada hewan yang bisa diupgrade (coin tidak cukup / semua max level).');
-      div();
+      divEq();
       return;
     }
 
     log(`  📦 Hewan yang akan diupgrade: ${upgradeQueue.join(', ')}`);
-    div();
+    divEq();
     const konfirm = await prompt('  Lanjutkan upgrade semua? (y/n): ');
     if (konfirm.toLowerCase() !== 'y') { log('  ↩️  Dibatalkan.'); return; }
 
@@ -444,35 +481,37 @@ async function menuUpgrade() {
       await upgrade(animal);
       await sleep(1000);
     }
-    log('✅ Selesai upgrade semua.');
+    log('✅ Selesai upgrade semua hewan.');
     return;
   }
 
-  // Upgrade hewan tertentu
+  // ── Upgrade HEWAN TERTENTU ─────────────────────────
   const animalType = animalFromChoice(choice);
   if (!animalType) { log('❌ Pilihan tidak valid.'); return; }
 
   const currentLevel = farm.levelMap[animalType] ?? 1;
   const cost         = getUpgradeCost(animalType, currentLevel);
   const emoji        = ANIMAL_EMOJI[animalType];
+  const label        = ANIMAL_LABEL[animalType];
 
-  div();
-  log(`⬆️  DETAIL UPGRADE ${emoji} ${animalType.toUpperCase()}`);
+  divEq();
+  log(`⬆️  DETAIL UPGRADE ${emoji} ${label.toUpperCase()}`);
   divDot();
-  log(`  🐾 Hewan          : ${emoji} ${animalType}`);
+  log(`  🐾 Hewan          : ${emoji} ${label}`);
   log(`  📊 Level saat ini : ${currentLevel}`);
 
   if (currentLevel >= MAX_LEVEL) {
     log(`  🏆 Status         : MAX LEVEL — tidak bisa upgrade lagi!`);
-    div();
+    divEq();
     return;
   }
 
   log(`  📈 Target level   : ${currentLevel + 1}`);
+  log(`  💰 Coin kamu      : ${coinBalance.toLocaleString('id-ID')}`);
 
   if (cost === null) {
-    log(`  ⚠️  Biaya upgrade  : Data tidak tersedia`);
-    div();
+    log(`  ⚠️  Biaya upgrade  : Data tidak tersedia di tabel lokal`);
+    divEq();
     const konfirm = await prompt('  Tetap coba upgrade? (y/n): ');
     if (konfirm.toLowerCase() === 'y') await upgrade(animalType);
     return;
@@ -481,66 +520,119 @@ async function menuUpgrade() {
   const cukup    = coinBalance >= cost;
   const sisaCoin = coinBalance - cost;
 
-  log(`  💰 Coin kamu      : ${coinBalance.toLocaleString('id-ID')}`);
-  log(`  💸 Biaya upgrade  : ${cost.toLocaleString('id-ID')}`);
+  log(`  💸 Biaya upgrade  : ${cost.toLocaleString('id-ID')} koin`);
 
   if (cukup) {
     log(`  ✅ Status coin    : CUKUP`);
-    log(`  💵 Sisa setelah   : ${sisaCoin.toLocaleString('id-ID')}`);
+    log(`  💵 Sisa setelah 1x: ${sisaCoin.toLocaleString('id-ID')} koin`);
   } else {
     const kurang = cost - coinBalance;
     log(`  ❌ Status coin    : TIDAK CUKUP`);
     log(`  📉 Kekurangan     : ${kurang.toLocaleString('id-ID')} koin`);
+    divEq();
+    log(`  ℹ️  Kumpulkan lebih banyak koin untuk upgrade ${label}.`);
+    return;
   }
 
+  // Hitung berapa kali maksimal bisa upgrade dari level ini
+  // (level naik setiap upgrade, jadi biaya ikut naik)
+  divDot();
+  let simCoin  = coinBalance;
+  let simLevel = currentLevel;
+  let maxKali  = 0;
+  const upgradeSimList = [];
+  while (simLevel < MAX_LEVEL) {
+    const simCost = getUpgradeCost(animalType, simLevel);
+    if (simCost === null || simCoin < simCost) break;
+    simCoin  -= simCost;
+    simLevel += 1;
+    maxKali  += 1;
+    upgradeSimList.push({ from: simLevel - 1, to: simLevel, cost: simCost });
+  }
+
+  log(`  🔢 Maks upgrade    : ${maxKali}x  (Lv${currentLevel} → Lv${Math.min(currentLevel + maxKali, MAX_LEVEL)})`);
+  log(`  💰 Sisa jika maks  : ${simCoin.toLocaleString('id-ID')} koin`);
   divDot();
 
-  // Tanya berapa kali upgrade
-  if (cukup) {
-    const maxKali = Math.floor(coinBalance / cost);
-    log(`  🔢 Bisa upgrade   : maks ${maxKali}x dengan coin saat ini`);
-    divDot();
-    const inputKali = await prompt(`  Berapa kali upgrade ${animalType}? (1-${maxKali}, tekan Enter = 1): `);
-    const kali = Math.min(Math.max(parseInt(inputKali) || 1, 1), maxKali);
+  // Preview simulasi tiap upgrade
+  log(`  📋 Simulasi biaya per upgrade ${emoji} ${label}:`);
+  upgradeSimList.forEach((sim, i) => {
+    log(`     ${i + 1}. Lv${sim.from} → Lv${sim.to}  :  ${sim.cost.toLocaleString('id-ID')} koin`);
+  });
+  divDot();
 
-    const totalBiaya = cost * kali;
-    div();
-    log(`  📦 Konfirmasi Upgrade`);
-    divDot();
-    log(`  🐾 Hewan   : ${emoji} ${animalType}`);
-    log(`  🔁 Jumlah  : ${kali}x`);
-    log(`  💸 Total   : ${totalBiaya.toLocaleString('id-ID')} koin`);
-    log(`  💰 Sisa    : ${(coinBalance - totalBiaya).toLocaleString('id-ID')} koin`);
-    divDot();
-    const konfirm = await prompt('  Lanjutkan upgrade? (y/n): ');
-    if (konfirm.toLowerCase() !== 'y') { log('  ↩️  Dibatalkan.'); return; }
+  const inputKali = await prompt(`  Berapa kali upgrade ${label}? (1-${maxKali}, Enter = 1): `);
+  const kali = Math.min(Math.max(parseInt(inputKali) || 1, 1), maxKali);
 
-    for (let i = 0; i < kali; i++) {
-      log(`  🔧 Upgrade ke-${i + 1}...`);
-      const result = await upgrade(animalType);
-      if (!result) { log(`  ⚠️  Proses berhenti pada upgrade ke-${i + 1}.`); break; }
-      if (i < kali - 1) await sleep(800);
-    }
-    log(`✅ Selesai ${kali}x upgrade ${animalType}.`);
-
-  } else {
-    div();
-    log(`  ℹ️  Kumpulkan lebih banyak koin untuk upgrade ${animalType}.`);
+  // Hitung total biaya riil untuk `kali` kali
+  let totalBiaya = 0;
+  for (let i = 0; i < kali; i++) {
+    const c = getUpgradeCost(animalType, currentLevel + i);
+    if (c !== null) totalBiaya += c;
   }
+
+  divEq();
+  log(`  📦 KONFIRMASI UPGRADE ${emoji} ${label.toUpperCase()}`);
+  divDot();
+  log(`  🐾 Hewan          : ${emoji} ${label}`);
+  log(`  🔁 Jumlah upgrade  : ${kali}x`);
+  log(`  📊 Level saat ini  : ${currentLevel}`);
+  log(`  📈 Level setelah   : ${currentLevel + kali}`);
+  log(`  💸 Total biaya     : ${totalBiaya.toLocaleString('id-ID')} koin`);
+  log(`  💰 Coin sekarang   : ${coinBalance.toLocaleString('id-ID')} koin`);
+  log(`  💵 Sisa setelah    : ${(coinBalance - totalBiaya).toLocaleString('id-ID')} koin`);
+  divDot();
+
+  const konfirm = await prompt('  Lanjutkan upgrade? (y/n): ');
+  if (konfirm.toLowerCase() !== 'y') { log('  ↩️  Dibatalkan.'); return; }
+
+  let berhasil = 0;
+  for (let i = 0; i < kali; i++) {
+    log(`  🔧 Upgrade ke-${i + 1} dari ${kali}...`);
+    const result = await upgrade(animalType);
+    if (!result) {
+      log(`  ⚠️  Proses berhenti pada upgrade ke-${i + 1}.`);
+      break;
+    }
+    berhasil++;
+    if (i < kali - 1) await sleep(800);
+  }
+
+  divEq();
+  log(`✅ Selesai: ${berhasil} dari ${kali}x upgrade ${emoji} ${label} berhasil.`);
+  log(`📊 Level sekarang: ${currentLevel + berhasil}`);
+  divEq();
 }
 
-// ─── Main Menu Loop ───────────────────────────────────
+// ══════════════════════════════════════════════════════
+//  MENU UTAMA
+// ══════════════════════════════════════════════════════
+
+function printMainMenu() {
+  console.log('\n' + '═'.repeat(50));
+  console.log('🤖  BOT CATTLE FARM  —  Menu Utama');
+  console.log('═'.repeat(50));
+  console.log('  [1] 🏡  Lihat Status Farm');
+  console.log('  [2] 🌾  Harvest Hewan');
+  console.log('  [3] ⬆️   Upgrade Hewan');
+  console.log('  [4] 📋  Join & Claim Tasks');
+  console.log('  [5] 📺  Watch Ad & Earn');
+  console.log('  [6] 👤  Info Akun');
+  console.log('  [0] 🚪  Keluar');
+  console.log('─'.repeat(50));
+}
+
 async function mainMenu() {
   while (true) {
     printMainMenu();
     const choice = await prompt('  Masukkan pilihan: ');
     switch (choice) {
-      case '1': await getFarmStatus(); break;
-      case '2': await menuHarvest();   break;
-      case '3': await menuUpgrade();   break;
-      case '4': await autoJoinTasks(); break;
+      case '1': await getFarmStatus();  break;
+      case '2': await menuHarvest();    break;
+      case '3': await menuUpgrade();    break;
+      case '4': await autoJoinTasks();  break;
       case '5': await watchAdAndEarn(); break;
-      case '6': await getMe();         break;
+      case '6': await getMe();          break;
       case '0':
         console.log('\n👋 Bot dihentikan. Sampai jumpa!\n');
         process.exit(0);
@@ -561,11 +653,10 @@ async function run() {
   await watchAdAndEarn();
   await autoJoinTasks();
 
-  // Masuk ke menu interaktif
   await mainMenu();
 }
 
-// ─── Cron (tetap berjalan di background) ──────────────
+// ─── Cron Jobs ────────────────────────────────────────
 cron.schedule('0 */2 * * *', async () => {
   log('\n🔄 [CRON] Harvest otomatis semua hewan...');
   await autoHarvestAll();
@@ -577,7 +668,6 @@ cron.schedule('0 8 * * *', async () => {
 }, { timezone: 'Asia/Jakarta' });
 
 cron.schedule('*/10 * * * *', async () => {
-  // Cron watch ad berjalan diam-diam di background
   try {
     const dur = Math.floor(Math.random() * 10000) + 5000;
     await sleep(dur);
