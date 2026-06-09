@@ -22,7 +22,8 @@ const log = (msg) => console.log(`[${new Date().toLocaleString('id-ID')}] ${msg}
 async function getMe() {
   try {
     const { data } = await api.get('/api/user/me');
-    log(`👤 User: ${data.username || data.first_name} | Balance: ${data.balance ?? data.coins ?? '-'}`);
+    const balance = data.coinBalance ?? data.balance ?? data.coins ?? '-';
+    log(`👤 User: ${data.username || data.first_name} | Balance: ${balance}`);
     return data;
   } catch (e) {
     log(`❌ getMe gagal: ${e.response?.data?.message || e.message}`);
@@ -69,33 +70,31 @@ async function autoHarvest() {
   const status = await getFarmStatus();
   if (!status) return;
 
-  // Ambil data hewan — sesuaikan dengan struktur JSON aktual
-  const animal = status[ANIMAL]
-    || status.animals?.[ANIMAL]
-    || status.farm?.[ANIMAL];
+  // Ambil data hewan dari array timers
+  const animal = status.timers?.find(t => t.animalType === ANIMAL);
 
   if (!animal) {
-    log(`⚠️ Data ${ANIMAL} tidak ditemukan di respons farm. Cek struktur JSON.`);
+    log(`⚠️ Data ${ANIMAL} tidak ditemukan di timers.`);
     return;
   }
 
-  const isReady = animal.isReady ?? animal.canClaim ?? animal.ready ?? false;
+  const isReady = animal.isReady ?? false;
 
   if (isReady) {
     log(`🌾 ${ANIMAL} siap dipanen!`);
     await harvest();
   } else {
-    const sisa = animal.timeLeft ?? animal.nextHarvest ?? animal.remainingTime ?? '?';
-    log(`⏳ Belum siap panen. Sisa waktu: ${sisa}`);
+    const sisa = animal.nextClaimAt ?? '?';
+    log(`⏳ Belum siap panen. Next claim: ${sisa}`);
   }
 }
 
 // ─── Auto Upgrade (opsional, jalankan manual) ─────────
 async function autoUpgrade() {
   log('⬆️ Mencoba upgrade farm...');
-  await getMe();       // lihat balance dulu
+  await getMe();
   await upgrade();
-  await getMe();       // lihat balance setelah upgrade
+  await getMe();
   await getFarmStatus();
 }
 
