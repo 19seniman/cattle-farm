@@ -18,12 +18,52 @@ const api = axios.create({
 
 const log = (msg) => console.log(`[${new Date().toLocaleString('id-ID')}] ${msg}`);
 
+const divider = (char = '─', len = 45) => console.log(char.repeat(len));
+
+function formatNextClaim(isoString) {
+  if (!isoString) return 'N/A';
+  const date = new Date(isoString);
+  return date.toLocaleString('id-ID', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    timeZone: 'Asia/Jakarta'
+  });
+}
+
+function getTimeLeft(isoString) {
+  if (!isoString) return null;
+  const diff = new Date(isoString) - Date.now();
+  if (diff <= 0) return '00:00:00';
+  const h = String(Math.floor(diff / 3600000)).padStart(2, '0');
+  const m = String(Math.floor((diff % 3600000) / 60000)).padStart(2, '0');
+  const s = String(Math.floor((diff % 60000) / 1000)).padStart(2, '0');
+  return `${h}:${m}:${s}`;
+}
+
+const ANIMAL_EMOJI = {
+  chicken: '🐔',
+  duck:    '🦆',
+  goat:    '🐐',
+  cow:     '🐄',
+};
+
+const PRODUCT_EMOJI = {
+  chicken: '🥚',
+  duck:    '🥚',
+  goat:    '🥛',
+  cow:     '🥛',
+};
+
 // ─── Info User ────────────────────────────────────────
 async function getMe() {
   try {
     const { data } = await api.get('/api/user/me');
     const balance = data.coinBalance ?? data.balance ?? data.coins ?? '-';
-    log(`👤 User: ${data.username || data.first_name} | Balance: ${balance}`);
+    divider();
+    log(`👤 User     : ${data.username || data.first_name}`);
+    log(`💰 Coin     : ${balance}`);
+    log(`💵 Rupiah   : ${data.rupiahBalance ?? '-'}`);
+    divider();
     return data;
   } catch (e) {
     log(`❌ getMe gagal: ${e.response?.data?.message || e.message}`);
@@ -34,7 +74,41 @@ async function getMe() {
 async function getFarmStatus() {
   try {
     const { data } = await api.get('/api/farm/status');
-    log(`🏡 Farm Status: ${JSON.stringify(data)}`);
+
+    divider();
+    log('🏡 FARM STATUS');
+    divider('·');
+
+    // Balances
+    const animals = ['chicken', 'duck', 'goat', 'cow'];
+    const balanceMap = {
+      chicken : data.balances?.chickenEggBalance ?? 0,
+      duck    : data.balances?.duckEggBalance    ?? 0,
+      goat    : data.balances?.goatMilkBalance   ?? 0,
+      cow     : data.balances?.cowMilkBalance    ?? 0,
+    };
+    const levelMap = {
+      chicken : data.levels?.chickenLevel ?? 0,
+      duck    : data.levels?.duckLevel    ?? 0,
+      goat    : data.levels?.goatLevel    ?? 0,
+      cow     : data.levels?.cowLevel     ?? 0,
+    };
+
+    log('  Hewan    Lv   Produk   Status         Next Claim');
+    divider('·');
+    for (const a of animals) {
+      const timer   = data.timers?.find(t => t.animalType === a);
+      const emoji   = ANIMAL_EMOJI[a]  || '🐾';
+      const pemoji  = PRODUCT_EMOJI[a] || '📦';
+      const lv      = String(levelMap[a]).padEnd(3);
+      const stok    = String(`${pemoji} ${balanceMap[a]}`).padEnd(8);
+      const ready   = timer?.isReady;
+      const status  = ready ? '✅ SIAP PANEN ' : '⏳ ' + (getTimeLeft(timer?.nextClaimAt) ?? 'N/A   ');
+      const next    = ready ? '-' : formatNextClaim(timer?.nextClaimAt);
+      log(`  ${emoji} ${a.padEnd(7)} Lv${lv} ${stok} ${status}  ${next}`);
+    }
+
+    divider();
     return data;
   } catch (e) {
     log(`❌ getFarmStatus gagal: ${e.response?.data?.message || e.message}`);
@@ -45,7 +119,10 @@ async function getFarmStatus() {
 async function harvest() {
   try {
     const { data } = await api.post('/api/farm/claim', { animalType: ANIMAL });
-    log(`✅ Harvest berhasil! ${JSON.stringify(data)}`);
+    divider();
+    log(`✅ Harvest ${ANIMAL_EMOJI[ANIMAL] || ''} ${ANIMAL} berhasil!`);
+    if (data.reward || data.amount) log(`🎁 Reward   : ${data.reward ?? data.amount}`);
+    divider();
     return data;
   } catch (e) {
     log(`❌ Harvest gagal: ${e.response?.data?.message || e.message}`);
@@ -56,67 +133,69 @@ async function harvest() {
 async function upgrade() {
   try {
     const { data } = await api.post('/api/farm/upgrade', { animalType: ANIMAL });
-    log(`⬆️ Upgrade berhasil! ${JSON.stringify(data)}`);
+    divider();
+    log(`⬆️  Upgrade ${ANIMAL} berhasil!`);
+    if (data.level) log(`📈 Level baru : ${data.level}`);
+    divider();
     return data;
   } catch (e) {
-    const msg = e.response?.data?.message || e.message;
-    log(`❌ Upgrade gagal: ${msg}`);
+    log(`❌ Upgrade gagal: ${e.response?.data?.message || e.message}`);
   }
 }
 
-// ─── Auto Harvest (cek dulu sebelum claim) ────────────
+// ─── Auto Harvest ─────────────────────────────────────
 async function autoHarvest() {
   log('🔍 Mengecek status farm...');
   const status = await getFarmStatus();
   if (!status) return;
 
-  // Ambil data hewan dari array timers
   const animal = status.timers?.find(t => t.animalType === ANIMAL);
-
   if (!animal) {
-    log(`⚠️ Data ${ANIMAL} tidak ditemukan di timers.`);
+    log(`⚠️  Data ${ANIMAL} tidak ditemukan di timers.`);
     return;
   }
 
-  const isReady = animal.isReady ?? false;
-
-  if (isReady) {
+  if (animal.isReady) {
     log(`🌾 ${ANIMAL} siap dipanen!`);
     await harvest();
   } else {
-    const sisa = animal.nextClaimAt ?? '?';
-    log(`⏳ Belum siap panen. Next claim: ${sisa}`);
+    const timeLeft = getTimeLeft(animal.nextClaimAt);
+    const next     = formatNextClaim(animal.nextClaimAt);
+    divider('·');
+    log(`⏳ Belum siap panen`);
+    log(`⏱  Sisa waktu  : ${timeLeft}`);
+    log(`📅 Next claim  : ${next}`);
+    divider('·');
   }
 }
 
-// ─── Auto Upgrade (opsional, jalankan manual) ─────────
+// ─── Auto Upgrade ─────────────────────────────────────
 async function autoUpgrade() {
-  log('⬆️ Mencoba upgrade farm...');
+  log('⬆️  Mencoba upgrade farm...');
   await getMe();
   await upgrade();
   await getMe();
   await getFarmStatus();
 }
 
-// ─── Jalankan semua saat start ────────────────────────
+// ─── Run ──────────────────────────────────────────────
 async function run() {
-  console.log('\n🤖 ====== Bot Cattle Farm Started ======\n');
+  console.log('\n' + '═'.repeat(45));
+  console.log('🤖  BOT CATTLE FARM  —  Starting...');
+  console.log('═'.repeat(45) + '\n');
   await getMe();
   await autoHarvest();
 }
 
-// ─── Jadwal Otomatis ──────────────────────────────────
-// Cek harvest setiap 2 jam
+// ─── Cron ─────────────────────────────────────────────
 cron.schedule('0 */2 * * *', async () => {
   log('\n🔄 Jadwal harvest otomatis...');
   await autoHarvest();
 }, { timezone: 'Asia/Jakarta' });
 
-// Upgrade otomatis setiap hari jam 08:00
 cron.schedule('0 8 * * *', async () => {
   log('\n🔄 Jadwal upgrade otomatis...');
   await autoUpgrade();
 }, { timezone: 'Asia/Jakarta' });
 
-// Jalankan langsung
 run();
