@@ -3,6 +3,7 @@ const axios = require('axios');
 const cron = require('node-cron');
 
 const ANIMAL = process.env.ANIMAL_TYPE || 'chicken';
+const ALL_ANIMALS = ['chicken', 'duck', 'goat', 'cow'];
 
 const api = axios.create({
   baseURL: process.env.BASE_URL,
@@ -12,7 +13,7 @@ const api = axios.create({
     'Accept': '*/*',
     'Origin': process.env.BASE_URL,
     'Referer': `${process.env.BASE_URL}/`,
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 Edg/149.0.0.0'
   }
 });
 
@@ -39,6 +40,8 @@ function getTimeLeft(isoString) {
   const s = String(Math.floor((diff % 60000) / 1000)).padStart(2, '0');
   return `${h}:${m}:${s}`;
 }
+
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 const ANIMAL_EMOJI = {
   chicken: '🐔',
@@ -79,8 +82,6 @@ async function getFarmStatus() {
     log('🏡 FARM STATUS');
     divider('·');
 
-    // Balances
-    const animals = ['chicken', 'duck', 'goat', 'cow'];
     const balanceMap = {
       chicken : data.balances?.chickenEggBalance ?? 0,
       duck    : data.balances?.duckEggBalance    ?? 0,
@@ -96,7 +97,7 @@ async function getFarmStatus() {
 
     log('  Hewan    Lv   Produk   Status         Next Claim');
     divider('·');
-    for (const a of animals) {
+    for (const a of ALL_ANIMALS) {
       const timer   = data.timers?.find(t => t.animalType === a);
       const emoji   = ANIMAL_EMOJI[a]  || '🐾';
       const pemoji  = PRODUCT_EMOJI[a] || '📦';
@@ -116,64 +117,165 @@ async function getFarmStatus() {
 }
 
 // ─── Harvest / Claim ──────────────────────────────────
-async function harvest() {
+async function harvest(animalType = ANIMAL) {
   try {
-    const { data } = await api.post('/api/farm/claim', { animalType: ANIMAL });
+    const { data } = await api.post('/api/farm/claim', { animalType });
     divider();
-    log(`✅ Harvest ${ANIMAL_EMOJI[ANIMAL] || ''} ${ANIMAL} berhasil!`);
+    log(`✅ Harvest ${ANIMAL_EMOJI[animalType] || ''} ${animalType} berhasil!`);
     if (data.reward || data.amount) log(`🎁 Reward   : ${data.reward ?? data.amount}`);
     divider();
     return data;
   } catch (e) {
-    log(`❌ Harvest gagal: ${e.response?.data?.message || e.message}`);
+    log(`❌ Harvest ${animalType} gagal: ${e.response?.data?.message || e.message}`);
   }
 }
 
-// ─── Upgrade Farm ─────────────────────────────────────
-async function upgrade() {
+// ─── Upgrade Farm (single animal) ─────────────────────
+async function upgrade(animalType = ANIMAL) {
   try {
-    const { data } = await api.post('/api/farm/upgrade', { animalType: ANIMAL });
+    const { data } = await api.post(
+      '/api/farm/upgrade',
+      { animalType },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'Origin': process.env.BASE_URL,
+          'Referer': `${process.env.BASE_URL}/`,
+        }
+      }
+    );
     divider();
-    log(`⬆️  Upgrade ${ANIMAL} berhasil!`);
-    if (data.level) log(`📈 Level baru : ${data.level}`);
+    log(`⬆️  Upgrade ${ANIMAL_EMOJI[animalType] || ''} ${animalType} berhasil!`);
+    if (data.level)   log(`📈 Level baru : ${data.level}`);
+    if (data.message) log(`💬 Pesan      : ${data.message}`);
     divider();
     return data;
   } catch (e) {
-    log(`❌ Upgrade gagal: ${e.response?.data?.message || e.message}`);
+    const msg = e.response?.data?.message || e.message;
+    const status = e.response?.status;
+    divider('·');
+    if (status === 400) {
+      log(`⚠️  Upgrade ${animalType} gagal: ${msg} (koin tidak cukup / sudah max level)`);
+    } else {
+      log(`❌ Upgrade ${animalType} gagal: ${msg}`);
+    }
+    divider('·');
   }
 }
 
-// ─── Auto Harvest ─────────────────────────────────────
-async function autoHarvest() {
-  log('🔍 Mengecek status farm...');
+// ─── Upgrade All Animals ───────────────────────────────
+async function upgradeAll() {
+  divider();
+  log('⬆️  UPGRADE SEMUA HEWAN');
+  divider('·');
+
+  for (const animal of ALL_ANIMALS) {
+    log(`🔧 Mencoba upgrade ${ANIMAL_EMOJI[animal]} ${animal}...`);
+    await upgrade(animal);
+    await sleep(1000); // jeda 1 detik antar request
+  }
+
+  log('✅ Proses upgrade semua hewan selesai.');
+  divider();
+}
+
+// ─── Watch Ad & Earn ──────────────────────────────────
+async function watchAdAndEarn() {
+  try {
+    log('📺 Memulai Watch Ad & Earn...');
+
+    // Simulasi durasi menonton iklan (5–15 detik acak)
+    const watchDuration = Math.floor(Math.random() * 10000) + 5000;
+    log(`⏱  Menonton iklan selama ${(watchDuration / 1000).toFixed(1)} detik...`);
+    await sleep(watchDuration);
+
+    // Klaim reward setelah nonton iklan
+    const { data } = await api.post('/api/user/claim-ad-reward');
+    divider();
+    log('✅ Watch Ad & Earn berhasil diklaim!');
+    if (data.reward || data.amount || data.coins) {
+      log(`🎁 Reward   : ${data.reward ?? data.amount ?? data.coins}`);
+    }
+    if (data.coinBalance || data.balance) {
+      log(`💰 Saldo    : ${data.coinBalance ?? data.balance}`);
+    }
+    divider();
+    return data;
+  } catch (e) {
+    const msg = e.response?.data?.message || e.message;
+    if (e.response?.status === 400 || e.response?.status === 429) {
+      divider('·');
+      log(`⏳ Ad reward belum tersedia: ${msg}`);
+      divider('·');
+    } else {
+      log(`❌ Watch Ad gagal: ${msg}`);
+    }
+  }
+}
+
+// ─── Auto Watch Ad Loop ───────────────────────────────
+async function autoWatchAd() {
+  log('\n📺 Jadwal Watch Ad & Earn...');
+  await watchAdAndEarn();
+}
+
+// ─── Auto Harvest (single animal) ─────────────────────
+async function autoHarvest(animalType = ANIMAL) {
+  log(`🔍 Mengecek status farm untuk ${animalType}...`);
   const status = await getFarmStatus();
   if (!status) return;
 
-  const animal = status.timers?.find(t => t.animalType === ANIMAL);
+  const animal = status.timers?.find(t => t.animalType === animalType);
   if (!animal) {
-    log(`⚠️  Data ${ANIMAL} tidak ditemukan di timers.`);
+    log(`⚠️  Data ${animalType} tidak ditemukan di timers.`);
     return;
   }
 
   if (animal.isReady) {
-    log(`🌾 ${ANIMAL} siap dipanen!`);
-    await harvest();
+    log(`🌾 ${animalType} siap dipanen!`);
+    await harvest(animalType);
   } else {
     const timeLeft = getTimeLeft(animal.nextClaimAt);
     const next     = formatNextClaim(animal.nextClaimAt);
     divider('·');
-    log(`⏳ Belum siap panen`);
+    log(`⏳ ${animalType} belum siap panen`);
     log(`⏱  Sisa waktu  : ${timeLeft}`);
     log(`📅 Next claim  : ${next}`);
     divider('·');
   }
 }
 
+// ─── Auto Harvest All Animals ─────────────────────────
+async function autoHarvestAll() {
+  log('🔍 Mengecek status semua hewan...');
+  const status = await getFarmStatus();
+  if (!status) return;
+
+  let harvested = 0;
+  for (const animal of ALL_ANIMALS) {
+    const timer = status.timers?.find(t => t.animalType === animal);
+    if (!timer) {
+      log(`⚠️  Data ${animal} tidak ditemukan di timers.`);
+      continue;
+    }
+    if (timer.isReady) {
+      log(`🌾 ${ANIMAL_EMOJI[animal]} ${animal} siap dipanen!`);
+      await harvest(animal);
+      harvested++;
+      await sleep(1000);
+    }
+  }
+
+  if (harvested === 0) {
+    log('ℹ️  Tidak ada hewan yang siap dipanen saat ini.');
+  }
+}
+
 // ─── Auto Upgrade ─────────────────────────────────────
 async function autoUpgrade() {
-  log('⬆️  Mencoba upgrade farm...');
+  log('⬆️  Mencoba upgrade semua hewan...');
   await getMe();
-  await upgrade();
+  await upgradeAll();
   await getMe();
   await getFarmStatus();
 }
@@ -184,18 +286,29 @@ async function run() {
   console.log('🤖  BOT CATTLE FARM  —  Starting...');
   console.log('═'.repeat(45) + '\n');
   await getMe();
-  await autoHarvest();
+  await autoHarvestAll();
+
+  // Langsung coba watch ad pertama kali saat bot start
+  await watchAdAndEarn();
 }
 
 // ─── Cron ─────────────────────────────────────────────
+
+// Auto harvest semua hewan setiap 2 jam
 cron.schedule('0 */2 * * *', async () => {
-  log('\n🔄 Jadwal harvest otomatis...');
-  await autoHarvest();
+  log('\n🔄 Jadwal harvest otomatis (semua hewan)...');
+  await autoHarvestAll();
 }, { timezone: 'Asia/Jakarta' });
 
+// Auto upgrade semua hewan setiap pukul 08:00
 cron.schedule('0 8 * * *', async () => {
-  log('\n🔄 Jadwal upgrade otomatis...');
+  log('\n🔄 Jadwal upgrade otomatis (semua hewan)...');
   await autoUpgrade();
+}, { timezone: 'Asia/Jakarta' });
+
+// Watch Ad & Earn setiap 10 menit
+cron.schedule('*/10 * * * *', async () => {
+  await autoWatchAd();
 }, { timezone: 'Asia/Jakarta' });
 
 run();
