@@ -163,30 +163,136 @@ async function upgrade(animalType) {
   }
 }
 
-// ─── Watch Ad ─────────────────────────────────────────
-async function watchAdAndEarn() {
+// ─── Watch Ad (core, 1x) ──────────────────────────────
+async function watchAdOnce() {
   try {
-    log('📺 Memulai Watch Ad & Earn...');
     const watchDuration = Math.floor(Math.random() * 10000) + 5000;
     log(`⏱  Menonton iklan selama ${(watchDuration / 1000).toFixed(1)} detik...`);
     await sleep(watchDuration);
     const { data } = await api.post('/api/user/claim-ad-reward');
-    div();
-    log('✅ Watch Ad & Earn berhasil diklaim!');
+    log('✅ Watch Ad berhasil diklaim!');
     if (data.reward || data.amount || data.coins)
       log(`🎁 Reward : ${data.reward ?? data.amount ?? data.coins}`);
     if (data.coinBalance || data.balance)
       log(`💰 Saldo  : ${data.coinBalance ?? data.balance}`);
-    div();
-    return data;
+    return { success: true, data };
   } catch (e) {
-    const msg = e.response?.data?.message || e.message;
-    if (e.response?.status === 400 || e.response?.status === 429) {
-      divDot(); log(`⏳ Ad reward belum tersedia: ${msg}`); divDot();
-    } else {
-      log(`❌ Watch Ad gagal: ${msg}`);
+    const msg    = e.response?.data?.message || e.message;
+    const status = e.response?.status;
+    if (status === 400 || status === 429) {
+      log(`⏳ Ad reward belum tersedia: ${msg}`);
+      return { success: false, cooldown: true };
     }
+    log(`❌ Watch Ad gagal: ${msg}`);
+    return { success: false, cooldown: false };
   }
+}
+
+// ─── Watch Ad ─────────────────────────────────────────
+async function watchAdAndEarn() {
+  divEq();
+  console.log('  📺 WATCH AD & EARN — Pilih Mode');
+  divDot();
+  console.log('  [1] 🖐  Manual       — 1x tonton, tunggu 10 mnt, lalu stop');
+  console.log('  [2] 🔁  Berurutan    — Tonton berulang hingga 50x tanpa berhenti');
+  console.log('  [9] ↩️   Kembali ke Menu Utama');
+  divDot();
+
+  const modeChoice = await prompt('  Masukkan pilihan: ');
+
+  // ── Mode 9: Kembali ────────────────────────────────
+  if (modeChoice === '9') return;
+
+  // ── Mode 1: Manual (1x + cooldown 10 mnt) ─────────
+  if (modeChoice === '1') {
+    divEq();
+    log('🖐  MODE MANUAL — 1x Watch Ad');
+    divDot();
+    const result = await watchAdOnce();
+    if (result.success) {
+      divDot();
+      log('⏳ Cooldown 10 menit dimulai...');
+      const COOLDOWN_MS  = 10 * 60 * 1000;
+      const interval     = 10 * 1000; // update setiap 10 detik
+      let   elapsed      = 0;
+      while (elapsed < COOLDOWN_MS) {
+        await sleep(interval);
+        elapsed += interval;
+        const sisa = COOLDOWN_MS - elapsed;
+        if (sisa > 0) {
+          const m = String(Math.floor(sisa / 60000)).padStart(2, '0');
+          const s = String(Math.floor((sisa % 60000) / 1000)).padStart(2, '0');
+          process.stdout.write(`\r  ⏱  Sisa cooldown : ${m}:${s}   `);
+        }
+      }
+      console.log('');
+      log('✅ Cooldown selesai. Mode Manual selesai.');
+    } else {
+      log('ℹ️  Mode Manual dihentikan karena iklan gagal diklaim.');
+    }
+    divEq();
+    return;
+  }
+
+  // ── Mode 2: Berurutan (hingga 50x) ────────────────
+  if (modeChoice === '2') {
+    divEq();
+    log('🔁  MODE BERURUTAN — Tonton Ads Berulang');
+    divDot();
+    const inputJumlah = await prompt('  Berapa kali watch ads? (1–50, Enter = 10): ');
+    const jumlah = Math.min(Math.max(parseInt(inputJumlah) || 10, 1), 50);
+
+    const inputJeda = await prompt('  Jeda antar ads (detik, min 5, Enter = 15): ');
+    const jedaSec   = Math.max(parseInt(inputJeda) || 15, 5);
+
+    divEq();
+    log(`📋 Rencana     : ${jumlah}x Watch Ads`);
+    log(`⏱  Jeda antar  : ${jedaSec} detik`);
+    divDot();
+    const konfirm = await prompt('  Mulai sekarang? (y/n): ');
+    if (konfirm.toLowerCase() !== 'y') { log('  ↩️  Dibatalkan.'); return; }
+    divEq();
+
+    let berhasil = 0;
+    let gagal    = 0;
+
+    for (let i = 1; i <= jumlah; i++) {
+      divDot();
+      log(`📺 [${i}/${jumlah}] Memulai Watch Ad...`);
+      const result = await watchAdOnce();
+
+      if (result.success) {
+        berhasil++;
+      } else {
+        gagal++;
+        if (result.cooldown) {
+          log(`⚠️  [${i}/${jumlah}] Server masih cooldown, mencoba lanjut...`);
+        } else {
+          log(`❌ [${i}/${jumlah}] Gagal, mencoba lanjut...`);
+        }
+      }
+
+      // Jeda antar ads (kecuali setelah ads terakhir)
+      if (i < jumlah) {
+        log(`⏳ Jeda ${jedaSec} detik sebelum ads berikutnya...`);
+        let elapsed = 0;
+        while (elapsed < jedaSec * 1000) {
+          await sleep(1000);
+          elapsed += 1000;
+          const sisa = jedaSec - Math.floor(elapsed / 1000);
+          if (sisa > 0) process.stdout.write(`\r  ⏱  Lanjut dalam : ${sisa} detik   `);
+        }
+        console.log('');
+      }
+    }
+
+    divEq();
+    log(`✅ Selesai! Berhasil : ${berhasil}x  |  Gagal : ${gagal}x  |  Total : ${jumlah}x`);
+    divEq();
+    return;
+  }
+
+  log('❌ Pilihan tidak valid.');
 }
 
 // ─── Auto Harvest All ─────────────────────────────────
@@ -740,7 +846,7 @@ async function run() {
 
   await getMe();
   await autoHarvestAll();
-  await watchAdAndEarn();
+  await watchAdOnce();
   await autoJoinTasks();
 
   await mainMenu();
@@ -758,12 +864,8 @@ cron.schedule('0 8 * * *', async () => {
 }, { timezone: 'Asia/Jakarta' });
 
 cron.schedule('*/10 * * * *', async () => {
-  try {
-    const dur = Math.floor(Math.random() * 10000) + 5000;
-    await sleep(dur);
-    await api.post('/api/user/claim-ad-reward');
-    log('📺 [CRON] Watch Ad diklaim.');
-  } catch (_) {}
+  log('📺 [CRON] Watch Ad otomatis...');
+  await watchAdOnce();
 }, { timezone: 'Asia/Jakarta' });
 
 cron.schedule('5 0 * * *', async () => {
