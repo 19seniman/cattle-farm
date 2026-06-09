@@ -700,6 +700,171 @@ async function menuUpgrade() {
 }
 
 // ══════════════════════════════════════════════════════
+//  CONVERT
+// ══════════════════════════════════════════════════════
+
+const CONVERT_ITEMS = {
+  '1': { key: 'chickenEgg', label: 'Chicken Egg', emoji: '🥚', animal: 'chicken' },
+  '2': { key: 'duckEgg',    label: 'Duck Egg',    emoji: '🥚', animal: 'duck'    },
+  '3': { key: 'goatMilk',   label: 'Goat Milk',   emoji: '🥛', animal: 'goat'    },
+  '4': { key: 'cowMilk',    label: 'Cow Milk',     emoji: '🥛', animal: 'cow'     },
+};
+
+async function getConvertRates() {
+  try {
+    const { data } = await api.get('/api/convert/rates');
+    return data;
+  } catch (e) {
+    log(`❌ Gagal ambil rates: ${e.response?.data?.message || e.message}`);
+    return null;
+  }
+}
+
+async function getConvertHistory() {
+  try {
+    const { data } = await api.get('/api/convert/history');
+    return data;
+  } catch (e) {
+    log(`❌ Gagal ambil history: ${e.response?.data?.message || e.message}`);
+    return null;
+  }
+}
+
+async function doConvert(itemType, amount) {
+  try {
+    const { data } = await api.post('/api/convert', { itemType, amount });
+    return { success: true, data };
+  } catch (e) {
+    const msg    = e.response?.data?.message || e.message;
+    const status = e.response?.status;
+    if (status === 400) {
+      log(`⚠️  Convert gagal: ${msg} (stok tidak cukup / limit tercapai)`);
+    } else {
+      log(`❌ Convert gagal: ${msg}`);
+    }
+    return { success: false };
+  }
+}
+
+async function menuConvert() {
+  divEq();
+  console.log('  💱 CONVERT PRODUK — Pilih Item');
+  divDot();
+  console.log('  [1] 🥚  Chicken Egg');
+  console.log('  [2] 🥚  Duck Egg');
+  console.log('  [3] 🥛  Goat Milk');
+  console.log('  [4] 🥛  Cow Milk');
+  console.log('  [5] 📜  Lihat Riwayat Convert');
+  console.log('  [9] ↩️   Kembali ke Menu Utama');
+  divDot();
+
+  const choice = await prompt('  Masukkan pilihan: ');
+  if (choice === '9') return;
+
+  // ── Riwayat Convert ───────────────────────────────
+  if (choice === '5') {
+    divEq();
+    log('📜 RIWAYAT CONVERT');
+    divDot();
+    const history = await getConvertHistory();
+    if (!history) { divEq(); return; }
+    const list = Array.isArray(history) ? history : (history.history ?? history.data ?? []);
+    if (list.length === 0) {
+      log('ℹ️  Belum ada riwayat convert.');
+    } else {
+      log(`  ${'Waktu'.padEnd(22)} ${'Item'.padEnd(14)} ${'Jumlah'.padStart(8)}  ${'Coin'.padStart(10)}`);
+      divDot();
+      list.slice(0, 20).forEach(h => {
+        const waktu  = formatNextClaim(h.createdAt ?? h.date ?? h.timestamp);
+        const item   = (h.itemType ?? h.item ?? '-').padEnd(14);
+        const jumlah = String(h.amount ?? '-').padStart(8);
+        const coin   = String(h.coinsEarned ?? h.coins ?? h.reward ?? '-').padStart(10);
+        log(`  ${waktu.padEnd(22)} ${item} ${jumlah}  ${coin}`);
+      });
+    }
+    divEq();
+    return;
+  }
+
+  const selected = CONVERT_ITEMS[choice];
+  if (!selected) { log('❌ Pilihan tidak valid.'); return; }
+
+  // Ambil rates & farm status sekaligus
+  const [rates, farm] = await Promise.all([getConvertRates(), getFarmStatus()]);
+
+  // Cari rate untuk item ini
+  let rateInfo = null;
+  if (rates) {
+    const rateList = Array.isArray(rates) ? rates : (rates.rates ?? rates.data ?? []);
+    rateInfo = rateList.find(r =>
+      (r.itemType ?? r.item ?? '').toLowerCase() === selected.key.toLowerCase()
+    );
+  }
+
+  // Stok dari farm status
+  const balanceMap = farm?.balanceMap ?? {};
+  const stokAda    = balanceMap[selected.animal] ?? 0;
+
+  divEq();
+  log(`💱 CONVERT ${selected.emoji} ${selected.label.toUpperCase()}`);
+  divDot();
+  log(`  ${selected.emoji} Item         : ${selected.label}`);
+  log(`  📦 Stok kamu  : ${stokAda.toLocaleString('id-ID')}`);
+
+  if (rateInfo) {
+    const ratePerUnit = rateInfo.coinsPerUnit ?? rateInfo.rate ?? rateInfo.coinPerItem ?? '?';
+    const dailyLimit  = rateInfo.dailyLimit  ?? rateInfo.maxPerDay ?? null;
+    log(`  💰 Rate        : ${ratePerUnit} koin / item`);
+    if (dailyLimit) log(`  📅 Limit/hari  : ${dailyLimit.toLocaleString('id-ID')} item`);
+  } else {
+    log(`  ℹ️  Rate        : tidak tersedia (lanjut tetap bisa)`);
+  }
+
+  divDot();
+
+  if (stokAda <= 0) {
+    log(`  ⚠️  Stok ${selected.label} kosong, tidak bisa convert.`);
+    divEq();
+    return;
+  }
+
+  const inputJumlah = await prompt(`  Berapa ${selected.label} yang ingin diconvert? (max ${stokAda}, Enter = semua): `);
+  const jumlah = inputJumlah === ''
+    ? stokAda
+    : Math.min(Math.max(parseInt(inputJumlah) || 1, 1), stokAda);
+
+  const estimasiCoin = rateInfo
+    ? jumlah * (rateInfo.coinsPerUnit ?? rateInfo.rate ?? rateInfo.coinPerItem ?? 0)
+    : null;
+
+  divEq();
+  log(`  📦 KONFIRMASI CONVERT`);
+  divDot();
+  log(`  ${selected.emoji} Item         : ${selected.label}`);
+  log(`  🔢 Jumlah      : ${jumlah.toLocaleString('id-ID')}`);
+  if (estimasiCoin) log(`  💰 Estimasi    : ~${estimasiCoin.toLocaleString('id-ID')} koin`);
+  divDot();
+
+  const konfirm = await prompt('  Lanjutkan convert? (y/n): ');
+  if (konfirm.toLowerCase() !== 'y') { log('  ↩️  Dibatalkan.'); return; }
+
+  log(`⏳ Memproses convert ${jumlah}x ${selected.label}...`);
+  const result = await doConvert(selected.key, jumlah);
+
+  if (result.success) {
+    div();
+    log(`✅ Convert ${selected.emoji} ${selected.label} berhasil!`);
+    const d = result.data;
+    if (d.coinsEarned || d.coins || d.reward)
+      log(`🎁 Koin didapat : ${(d.coinsEarned ?? d.coins ?? d.reward).toLocaleString('id-ID')}`);
+    if (d.coinBalance || d.balance)
+      log(`💰 Saldo koin   : ${(d.coinBalance ?? d.balance).toLocaleString('id-ID')}`);
+    if (d.message) log(`💬 Pesan        : ${d.message}`);
+    div();
+  }
+}
+
+// ══════════════════════════════════════════════════════
 //  MENU UTAMA
 // ══════════════════════════════════════════════════════
 
@@ -712,7 +877,8 @@ function printMainMenu() {
   console.log('  [3] ⬆️   Upgrade Hewan');
   console.log('  [4] 📋  Join & Claim Tasks');
   console.log('  [5] 📺  Watch Ad & Earn');
-  console.log('  [6] 👤  Info Akun');
+  console.log('  [6] 💱  Convert Produk');
+  console.log('  [7] 👤  Info Akun');
   console.log('  [0] 🚪  Keluar');
   console.log('─'.repeat(50));
 }
@@ -727,7 +893,8 @@ async function mainMenu() {
       case '3': await menuUpgrade();    break;
       case '4': await autoJoinTasks();  break;
       case '5': await watchAdAndEarn(); break;
-      case '6': await getMe();          break;
+      case '6': await menuConvert();    break;
+      case '7': await getMe();          break;
       case '0':
         console.log('\n👋 Bot dihentikan. Sampai jumpa!\n');
         process.exit(0);
